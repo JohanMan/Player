@@ -345,6 +345,7 @@ typedef struct _Player {
     int out_channels;
     jmethodID play_audio_track_method_id;
     Queue *audio_queue;
+    double audio_clock;
 } Player;
 
 // 消费载体
@@ -607,10 +608,18 @@ void* produce(void* arg) {
         }
         sleep(1);
     }
-    LOGE("produce finish ------------------- ");
     player_release(player);
     return NULL;
 }
+
+/* no AV sync correction is done if below the minimum AV sync threshold */
+#define AV_SYNC_THRESHOLD_MIN 0.04
+/* AV sync correction is done if above the maximum AV sync threshold */
+#define AV_SYNC_THRESHOLD_MAX 0.1
+/* If a frame duration is longer than this, it will not be duplicated to compensate AV sync */
+#define AV_SYNC_FRAMEDUP_THRESHOLD 0.1
+/* no AV correction is done if too big error */
+#define AV_NOSYNC_THRESHOLD 10.0
 
 /**
  * 消费函数
@@ -630,13 +639,16 @@ void* consume(void* arg) {
         return NULL;
     }
     AVCodecContext *codec_context;
+    AVStream *stream;
     Queue *queue;
     if (index == player->video_stream_index) {
         codec_context = player->video_codec_context;
+        stream = player->format_context->streams[player->video_stream_index];
         queue = player->video_queue;
         video_prepare(player, env);
     } else if (index == player->audio_stream_index) {
         codec_context = player->audio_codec_context;
+        stream = player->format_context->streams[player->audio_stream_index];
         queue = player->audio_queue;
         audio_prepare(player, env);
     }
@@ -661,14 +673,33 @@ void* consume(void* arg) {
             continue;
         }
         if (index == player->video_stream_index) {
+            double audio_clock = player->audio_clock;
+            double timestamp;
+            if(packet->pts == AV_NOPTS_VALUE) {
+                timestamp = 0;
+            } else {
+                timestamp = av_frame_get_best_effort_timestamp(frame) * av_q2d(stream->time_base);
+            }
+            double frame_rate = av_q2d(stream->avg_frame_rate);
+            frame_rate += frame->repeat_pict * (frame_rate * 0.5);
+            if (timestamp == 0.0) {
+                usleep((unsigned long)(frame_rate * 1000));
+            } else {
+                if (fabs(timestamp - audio_clock) > AV_SYNC_THRESHOLD_MIN &&
+                    fabs(timestamp - audio_clock) < AV_NOSYNC_THRESHOLD) {
+                    if (timestamp > audio_clock) {
+                        usleep((unsigned long)((timestamp - audio_clock)*1000000));
+                    }
+                }
+            }
             video_play(player, frame, env);
         } else if (index == player->audio_stream_index) {
+            player->audio_clock = packet->pts * av_q2d(stream->time_base);
             audio_play(player, frame, env);
         }
         av_packet_free(&packet);
     }
     player->java_vm->DetachCurrentThread();
-    LOGE("consume is finish ------------------------------ ");
     return NULL;
 }
 
@@ -677,6 +708,7 @@ void* consume(void* arg) {
  * @param player
  */
 void play_start(Player *player) {
+    player->audio_clock = 0;
     player->video_queue = (Queue*) malloc(sizeof(Queue));
     player->audio_queue = (Queue*) malloc(sizeof(Queue));
     queue_init(player->video_queue);
