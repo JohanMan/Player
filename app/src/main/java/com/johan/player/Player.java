@@ -86,6 +86,12 @@ public class Player {
     public native void play(String path, Surface surface, PlayerCallback callback);
 
     /**
+     * 快进/快退
+     * @param progress
+     */
+    public native void seekTo(int progress);
+
+    /**
      * 播放器回调
      */
     public interface PlayerCallback {

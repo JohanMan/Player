@@ -69,4 +69,11 @@
         android:onClick="play"
         />
 
+    <Button
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Seek To 30 Second"
+        android:onClick="seekTo"
+        />
+
 </LinearLayout>

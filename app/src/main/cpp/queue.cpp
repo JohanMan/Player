@@ -30,6 +30,7 @@ void queue_destroy(Queue* queue) {
     }
     queue->head = NULL;
     queue->tail = NULL;
+    queue->size = 0;
     queue->is_block = false;
     pthread_mutex_destroy(queue->mutex_id);
     pthread_cond_destroy(queue->not_empty_condition);
@@ -111,6 +112,26 @@ NodeElement queue_out(Queue* queue) {
     pthread_cond_signal(queue->not_full_condition);
     pthread_mutex_unlock(queue->mutex_id);
     return element;
+}
+
+/**
+ * 清空队列
+ * @param queue
+ */
+void queue_clear(Queue* queue) {
+    pthread_mutex_lock(queue->mutex_id);
+    Node* node = queue->head;
+    while (node != NULL) {
+        queue->head = queue->head->next;
+        free(node);
+        node = queue->head;
+    }
+    queue->head = NULL;
+    queue->tail = NULL;
+    queue->size = 0;
+    queue->is_block = true;
+    pthread_cond_signal(queue->not_full_condition);
+    pthread_mutex_unlock(queue->mutex_id);
 }
 
 /**

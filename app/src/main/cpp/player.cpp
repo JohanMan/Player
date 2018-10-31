@@ -355,8 +355,16 @@ typedef struct _Consumer {
     int stream_index;
 } Consumer;
 
+// 播放器
+Player *cplayer;
+
 // 线程相关
 pthread_t produce_id, video_consume_id, audio_consume_id;
+
+// 快进/快退相关
+bool is_seek;
+pthread_mutex_t seek_mutex;
+pthread_cond_t seek_condition;
 
 /**
  * 初始化播放器
@@ -610,7 +618,17 @@ void call_on_progress(Player *player, JNIEnv *env, double total, double current)
 void* produce(void* arg) {
     Player *player = (Player*) arg;
     AVPacket *packet = av_packet_alloc();
-    while (av_read_frame(player->format_context, packet) >= 0) {
+    for (;;) {
+        pthread_mutex_lock(&seek_mutex);
+        while (is_seek) {
+            LOGE("Player Log : produce waiting seek");
+            pthread_cond_wait(&seek_condition, &seek_mutex);
+            LOGE("Player Log : produce wake up seek");
+        }
+        pthread_mutex_unlock(&seek_mutex);
+        if (av_read_frame(player->format_context, packet) < 0) {
+            break;
+        }
         if (packet->stream_index == player->video_stream_index) {
             queue_in(player->video_queue, packet);
         } else if (packet->stream_index == player->audio_stream_index) {
@@ -676,8 +694,14 @@ void* consume(void* arg) {
     double total = stream->duration * av_q2d(stream->time_base);
     AVFrame *frame = av_frame_alloc();
     for (;;) {
+        pthread_mutex_lock(&seek_mutex);
+        while (is_seek) {
+            pthread_cond_wait(&seek_condition, &seek_mutex);
+        }
+        pthread_mutex_unlock(&seek_mutex);
         AVPacket *packet = queue_out(queue);
         if (packet == NULL) {
+            LOGE("consume packet is null");
             break;
         }
         result = avcodec_send_packet(codec_context, packet);
@@ -742,6 +766,8 @@ void thread_init(Player* player) {
     audio_consumer->player = player;
     audio_consumer->stream_index = player->audio_stream_index;
     pthread_create(&audio_consume_id, NULL, consume, audio_consumer);
+    pthread_mutex_init(&seek_mutex, NULL);
+    pthread_cond_init(&seek_condition, NULL);
 }
 
 /**
@@ -780,6 +806,32 @@ Java_com_johan_player_Player_play(JNIEnv *env, jobject instance, jstring path_, 
         play_start(player);
     }
     env->ReleaseStringUTFChars(path_, path);
+    cplayer = player;
+}
+
+/**
+ * 快进/快退
+ */
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_johan_player_Player_seekTo(JNIEnv *env, jobject instance, jint progress) {
+    is_seek = true;
+    pthread_mutex_lock(&seek_mutex);
+    queue_clear(cplayer->video_queue);
+    queue_clear(cplayer->audio_queue);
+    int result = av_seek_frame(cplayer->format_context, cplayer->video_stream_index, (int64_t) (progress / av_q2d(cplayer->format_context->streams[cplayer->video_stream_index]->time_base)), AVSEEK_FLAG_BACKWARD);
+    if (result < 0) {
+        LOGE("Player Error : Can not seek video to %d", progress);
+        return;
+    }
+    result = av_seek_frame(cplayer->format_context, cplayer->audio_stream_index, (int64_t) (progress / av_q2d(cplayer->format_context->streams[cplayer->audio_stream_index]->time_base)), AVSEEK_FLAG_BACKWARD);
+    if (result < 0) {
+        LOGE("Player Error : Can not seek audio to %d", progress);
+        return;
+    }
+    is_seek = false;
+    pthread_cond_broadcast(&seek_condition);
+    pthread_mutex_unlock(&seek_mutex);
 }
 
 /** ========================= 测试生产者和消费者模式代码 =========================

@@ -84,6 +84,12 @@ void queue_in(Queue* queue, NodeElement element);
 NodeElement queue_out(Queue* queue);
 
 /**
+ * 清空队列
+ * @param queue
+ */
+void queue_clear(Queue* queue);
+
+/**
  * 打断阻塞
  * @param queue
  */

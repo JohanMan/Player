@@ -66,4 +66,8 @@ public class MainActivity extends AppCompatActivity {
         return (minute < 10 ? ("0" + minute) : minute) + ":" + (second < 10 ? ("0" + second) : second);
     }
 
+    public void seekTo(View view) {
+        player.seekTo(30);
+    }
+
 }
