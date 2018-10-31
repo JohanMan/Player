@@ -4,11 +4,49 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <SurfaceView
-        android:id="@+id/surface_view"
+    <RelativeLayout
         android:layout_width="match_parent"
-        android:layout_height="250dp"
-        />
+        android:layout_height="250dp">
+
+        <SurfaceView
+            android:id="@+id/surface_view"
+            android:layout_width="match_parent"
+            android:layout_height="250dp"
+            />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:padding="10dp"
+            android:layout_alignParentBottom="true"
+            android:background="#50000000">
+
+            <TextView
+                android:id="@+id/current_time_view"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textColor="#ffffff"
+                android:textSize="18sp"
+                android:text="00:00"
+                />
+
+            <TextView
+                android:id="@+id/total_time_view"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textColor="#ffffff"
+                android:textSize="18sp"
+                android:gravity="right"
+                android:text="00:00"
+                />
+
+        </LinearLayout>
+
+    </RelativeLayout>
+
 
     <Button
         android:layout_width="match_parent"

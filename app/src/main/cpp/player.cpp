@@ -326,6 +326,7 @@ typedef struct _Player {
     // Java 实例
     jobject instance;
     jobject surface;
+    jobject callback;
     // 上下文
     AVFormatContext *format_context;
     // 视频相关
@@ -354,11 +355,6 @@ typedef struct _Consumer {
     int stream_index;
 } Consumer;
 
-// 生成函数声明
-void* produce(void* arg);
-// 消费函数声明
-void* consume(void* arg);
-
 // 线程相关
 pthread_t produce_id, video_consume_id, audio_consume_id;
 
@@ -366,13 +362,14 @@ pthread_t produce_id, video_consume_id, audio_consume_id;
  * 初始化播放器
  * @param player
  */
-void player_init(Player **player, JNIEnv *env, jobject instance, jobject surface) {
+void player_init(Player **player, JNIEnv *env, jobject instance, jobject surface, jobject callback) {
     *player = (Player*) malloc(sizeof(Player));
     JavaVM* java_vm;
     env->GetJavaVM(&java_vm);
     (*player)->java_vm = java_vm;
     (*player)->instance = env->NewGlobalRef(instance);
     (*player)->surface = env->NewGlobalRef(surface);
+    (*player)->callback = env->NewGlobalRef(callback);
 }
 
 /**
@@ -569,18 +566,39 @@ void player_release(Player* player) {
 }
 
 /**
- *  初始化线程
+ * 回调 Java Callback onStart方法
+ * @param player
  */
-void thread_init(Player* player) {
-    pthread_create(&produce_id, NULL, produce, player);
-    Consumer* video_consumer = (Consumer*) malloc(sizeof(Consumer));
-    video_consumer->player = player;
-    video_consumer->stream_index = player->video_stream_index;
-    pthread_create(&video_consume_id, NULL, consume, video_consumer);
-    Consumer* audio_consumer = (Consumer*) malloc(sizeof(Consumer));
-    audio_consumer->player = player;
-    audio_consumer->stream_index = player->audio_stream_index;
-    pthread_create(&audio_consume_id, NULL, consume, audio_consumer);
+void call_on_start(Player *player, JNIEnv *env) {
+    jclass callback_class = env->GetObjectClass(player->callback);
+    jmethodID on_start_method_id = env->GetMethodID(callback_class, "onStart", "()V");
+    env->CallVoidMethod(player->callback, on_start_method_id);
+    env->DeleteLocalRef(callback_class);
+}
+
+/**
+ * 回调 Java Callback onStart方法
+ * @param player
+ */
+void call_on_end(Player *player, JNIEnv *env) {
+    jclass callback_class = env->GetObjectClass(player->callback);
+    jmethodID on_end_method_id = env->GetMethodID(callback_class, "onEnd", "()V");
+    env->CallVoidMethod(player->callback, on_end_method_id);
+    env->DeleteLocalRef(callback_class);
+}
+
+/**
+ * 回调 Java Callback onStart方法
+ * @param player
+ * @param env
+ * @param total
+ * @param current
+ */
+void call_on_progress(Player *player, JNIEnv *env, double total, double current) {
+    jclass callback_class = env->GetObjectClass(player->callback);
+    jmethodID on_progress_method_id = env->GetMethodID(callback_class, "onProgress", "(II)V");
+    env->CallVoidMethod(player->callback, on_progress_method_id, (int) total, (int) current);
+    env->DeleteLocalRef(callback_class);
 }
 
 /**
@@ -652,6 +670,10 @@ void* consume(void* arg) {
         queue = player->audio_queue;
         audio_prepare(player, env);
     }
+    if (index == player->audio_stream_index) {
+        call_on_start(player, env);
+    }
+    double total = stream->duration * av_q2d(stream->time_base);
     AVFrame *frame = av_frame_alloc();
     for (;;) {
         AVPacket *packet = queue_out(queue);
@@ -696,11 +718,30 @@ void* consume(void* arg) {
         } else if (index == player->audio_stream_index) {
             player->audio_clock = packet->pts * av_q2d(stream->time_base);
             audio_play(player, frame, env);
+            call_on_progress(player, env, total, player->audio_clock);
         }
         av_packet_free(&packet);
     }
+    if (index == player->audio_stream_index) {
+        call_on_end(player, env);
+    }
     player->java_vm->DetachCurrentThread();
     return NULL;
+}
+
+/**
+ *  初始化线程
+ */
+void thread_init(Player* player) {
+    pthread_create(&produce_id, NULL, produce, player);
+    Consumer* video_consumer = (Consumer*) malloc(sizeof(Consumer));
+    video_consumer->player = player;
+    video_consumer->stream_index = player->video_stream_index;
+    pthread_create(&video_consume_id, NULL, consume, video_consumer);
+    Consumer* audio_consumer = (Consumer*) malloc(sizeof(Consumer));
+    audio_consumer->player = player;
+    audio_consumer->stream_index = player->audio_stream_index;
+    pthread_create(&audio_consume_id, NULL, consume, audio_consumer);
 }
 
 /**
@@ -721,11 +762,11 @@ void play_start(Player *player) {
  */
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_johan_player_Player_play(JNIEnv *env, jobject instance, jstring path_, jobject surface) {
+Java_com_johan_player_Player_play(JNIEnv *env, jobject instance, jstring path_, jobject surface, jobject callback) {
     const char *path = env->GetStringUTFChars(path_, 0);
     int result = 1;
     Player* player;
-    player_init(&player, env, instance, surface);
+    player_init(&player, env, instance, surface, callback);
     if (result > 0) {
         result = format_init(player, path);
     }

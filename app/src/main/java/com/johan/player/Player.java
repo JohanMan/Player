@@ -81,8 +81,29 @@ public class Player {
      * 同步播放音视频
      * @param path
      * @param surface
+     * @param callback
      */
-    public native void play(String path, Surface surface);
+    public native void play(String path, Surface surface, PlayerCallback callback);
+
+    /**
+     * 播放器回调
+     */
+    public interface PlayerCallback {
+        /**
+         * 播放开始
+         */
+        void onStart();
+        /**
+         * 进度
+         * @param total
+         * @param current
+         */
+        void onProgress(int total, int current);
+        /**
+         * 播放结束
+         */
+        void onEnd();
+    }
 
     /**
      * 测试C多线程
